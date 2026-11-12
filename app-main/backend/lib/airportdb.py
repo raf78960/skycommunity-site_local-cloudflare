@@ -86,24 +86,22 @@ def runway_ends(airport: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def best_runways(airport: dict[str, Any], wind_deg: float, wind_kt: float = 0) -> dict[str, list[str]]:
-    """Pistes au vent (max composante face au vent). Départs : les plus longues dans le vent. Vent calme → pistes longues."""
+    """Pistes au vent (max composante face au vent). Départs = pistes les plus longues dans le vent, arrivées = les plus courtes. Vent calme → idem sur 2 axes."""
     ends = runway_ends(airport)
     if not ends:
         return {"departures": [], "arrivals": []}
     if wind_kt < 3:
-        # vent faible : pistes les plus longues (une par axe)
+        # vent calme : départs sur la piste la plus longue ; arrivées sur la plus courte allant dans le même sens
         by_len = sorted(ends, key=lambda e: e["length_ft"], reverse=True)
-        seen = set()
-        picks = []
-        for e in by_len:
-            axis = e["ident"].rstrip("LCR")
-            if axis in seen:
-                continue
-            seen.add(axis)
-            picks.append(e["ident"])
-            if len(picks) >= 2:
-                break
-        return {"departures": picks, "arrivals": picks}
+        dep = by_len[0]
+
+        def _same_way(e):
+            d = abs((e["heading"] - dep["heading"] + 180) % 360 - 180)
+            return d <= 45
+
+        shorter = [e for e in by_len if _same_way(e) and e["length_ft"] < 0.95 * dep["length_ft"]]
+        arr = min(shorter, key=lambda e: e["length_ft"]) if shorter else dep
+        return {"departures": [dep["ident"]], "arrivals": [arr["ident"]]}
 
     def headwind(e: dict) -> float:
         # composante face au vent : cos(wind - runway_hdg)
@@ -113,18 +111,24 @@ def best_runways(airport: dict[str, Any], wind_deg: float, wind_kt: float = 0) -
 
     ranked = sorted(ends, key=headwind, reverse=True)
     best = headwind(ranked[0])
-    # garder celles proches du max (même sens global)
-    chosen = [e["ident"] for e in ranked if headwind(e) >= best - 2 and headwind(e) > 0][:3]
-    if not chosen:
-        chosen = [ranked[0]["ident"]]
+    # pistes bien dans le vent (≈ ±30° de la meilleure)
+    top = [e for e in ranked if headwind(e) >= best * 0.97] or [ranked[0]]
+    ref = max(top, key=lambda e: e["length_ft"])  # référence : la plus longue parmi les mieux au vent
 
-    # Départs : les pistes les plus longues parmi celles bien dans le vent (≈ ±30° de la meilleure).
-    usable = [e for e in ranked if headwind(e) > 0 and headwind(e) >= best * 0.87] or [ranked[0]]
+    def _near_ref(e):
+        return abs((e["heading"] - ref["heading"] + 180) % 360 - 180) <= 25
+
+    usable = [e for e in ranked if headwind(e) > 0 and _near_ref(e)] or [ref]
+    # les plus longues = départs, les plus courtes = arrivées (une seule piste / même longueur : les deux)
     longest = max(e["length_ft"] for e in usable)
-    deps = [e for e in usable if longest and e["length_ft"] >= 0.85 * longest] or usable
-    deps.sort(key=lambda e: (-e["length_ft"], -headwind(e)))
-    departures = list(dict.fromkeys(e["ident"] for e in deps))[:3]
-    return {"departures": departures, "arrivals": chosen}
+    deps = [e for e in usable if e["length_ft"] >= 0.95 * longest] or usable
+    arrs = [e for e in usable if e not in deps] or deps
+    deps = sorted(deps, key=lambda e: (-e["length_ft"], -headwind(e)))
+    arrs = sorted(arrs, key=lambda e: (e["length_ft"], -headwind(e)))
+    return {
+        "departures": list(dict.fromkeys(e["ident"] for e in deps))[:3],
+        "arrivals": list(dict.fromkeys(e["ident"] for e in arrs))[:3],
+    }
 
 
 def frequencies(airport: dict[str, Any]) -> dict[str, str]:
