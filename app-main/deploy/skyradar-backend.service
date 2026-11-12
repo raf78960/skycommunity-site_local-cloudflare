@@ -1,0 +1,19 @@
+# /etc/systemd/system/skyradar-backend.service   (adapter User et chemins)
+[Unit]
+Description=SkyCommunity Radar - backend (UNE SEULE instance)
+After=network-online.target mongod.service
+Wants=network-online.target
+
+[Service]
+User=skycommunity
+WorkingDirectory=/srv/skycommunity/app/backend
+# Même machine que nginx et le bot : 127.0.0.1
+# Machine séparée du bot : mettre l'IP PRIVÉE du site (ex. 10.0.0.11) pour que le bot puisse l'atteindre
+ExecStart=/srv/skycommunity/app/backend/.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

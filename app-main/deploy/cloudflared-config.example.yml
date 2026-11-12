@@ -1,0 +1,9 @@
+# Copier en "deploy/cloudflared-config.yml" (start-prod.ps1 l'utilise alors automatiquement)
+# Remplacer <ID-DU-TUNNEL>, le chemin du fichier .json et le nom de domaine.
+tunnel: <ID-DU-TUNNEL>
+credentials-file: C:\Users\<TOI>\.cloudflared\<ID-DU-TUNNEL>.json
+
+ingress:
+  - hostname: radar.exemple.fr
+    service: http://127.0.0.1:8001
+  - service: http_status:404
