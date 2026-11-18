@@ -180,14 +180,15 @@ async def build_atis(icao: str) -> dict | None:
     terrain: dict = {}
     runways = {"departures": [], "arrivals": []}
     freqs: dict = {}
+    wdeg = float(summary.get("wind_deg") or 0)
+    wkt = float(summary.get("wind_speed_kt") or 0)
     if airport:
         terrain = airportdb.terrain_summary(airport)
         freqs = terrain.get("frequencies") or {}
-        runways = airportdb.best_runways(
-            airport,
-            float(summary.get("wind_deg") or 0),
-            float(summary.get("wind_speed_kt") or 0),
-        )
+        runways = airportdb.best_runways(airport, wdeg, wkt)
+    if not (runways.get("departures") or runways.get("arrivals")):
+        # AirportDB absent / sans pistes : repli sur la base locale (runways.json)
+        runways = airportdb.best_runways(None, wdeg, wkt, ends=airportdb.local_runway_ends(code))
 
     name = terrain.get("name") or code
     elev = terrain.get("elevation_ft")

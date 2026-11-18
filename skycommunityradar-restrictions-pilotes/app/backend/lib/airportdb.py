@@ -53,6 +53,18 @@ async def fetch_airport(icao: str) -> dict[str, Any] | None:
         return None
 
 
+def _heading(raw: Any, ident: str) -> float:
+    """Cap vrai de la piste : valeur AirportDB si elle existe, sinon déduit de l'identifiant (08L → 80°).
+    Un cap absent ne doit JAMAIS valoir 0° (sinon le calcul de vent choisit des pistes fausses)."""
+    try:
+        if raw not in (None, ""):
+            return float(raw) % 360
+    except (TypeError, ValueError):
+        pass
+    digits = "".join(c for c in ident if c.isdigit())
+    return (int(digits) * 10 % 360) if digits else 0.0
+
+
 def runway_ends(airport: dict[str, Any]) -> list[dict[str, Any]]:
     """Liste des extrémités de piste utilisables (ident + heading)."""
     out: list[dict[str, Any]] = []
@@ -66,10 +78,7 @@ def runway_ends(airport: dict[str, Any]) -> list[dict[str, Any]]:
             ident = (rw.get(ident_key) or "").strip()
             if not ident:
                 continue
-            try:
-                hdg = float(rw.get(hdg_key) or 0)
-            except (TypeError, ValueError):
-                hdg = 0.0
+            hdg = _heading(rw.get(hdg_key), ident)
             try:
                 length = int(float(rw.get("length_ft") or 0))
             except (TypeError, ValueError):
@@ -85,9 +94,23 @@ def runway_ends(airport: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def best_runways(airport: dict[str, Any], wind_deg: float, wind_kt: float = 0) -> dict[str, list[str]]:
+def local_runway_ends(icao: str) -> list[dict[str, Any]]:
+    """Repli hors-ligne : pistes OurAirports de data/runways.json (même format que runway_ends)."""
+    from lib import runways as _rw
+
+    out = []
+    for r in _rw.runway_ends(icao):
+        if r["length_nm"] < 0.4:  # héliports / petites bandes
+            continue
+        out.append({"ident": str(r["ident"]).upper(), "heading": float(r["hdg"]),
+                    "length_ft": int(r["length_nm"] * _rw.FT_PER_NM), "surface": None})
+    return out
+
+
+def best_runways(airport: dict[str, Any] | None, wind_deg: float, wind_kt: float = 0,
+                 ends: list[dict[str, Any]] | None = None) -> dict[str, list[str]]:
     """Pistes au vent (max composante face au vent). Départs = pistes les plus longues dans le vent, arrivées = les plus courtes. Vent calme → idem sur 2 axes."""
-    ends = runway_ends(airport)
+    ends = ends if ends is not None else runway_ends(airport or {})
     if not ends:
         return {"departures": [], "arrivals": []}
     if wind_kt < 3:
