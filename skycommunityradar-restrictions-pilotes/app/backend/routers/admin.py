@@ -1,3 +1,4 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 import os
@@ -81,8 +82,11 @@ async def sync_user(user_id: str, user: dict = Depends(require("admin:users"))):
 
 @router.get("/events", response_model=list[FlightEvent])
 async def events(limit: int = Query(200, ge=1, le=1000), type: str | None = Query(None, pattern=r"^[a-z_]{2,20}$"),
-                 user: dict = Depends(require("admin:log"))):
-    docs = await db.events.find({"type": type} if type else {}, {"_id": 0}).sort("at", -1).to_list(limit)
+                 callsign: str | None = Query(None, max_length=12), user: dict = Depends(require("admin:log"))):
+    flt: dict = {"type": type} if type else {}
+    if callsign and callsign.strip():  # one flight's lines only (« tout est mélangé » otherwise)
+        flt["callsign"] = {"$regex": "^" + re.escape(callsign.strip()), "$options": "i"}
+    docs = await db.events.find(flt, {"_id": 0}).sort("at", -1).to_list(limit)
     return [FlightEvent(**{**d, "at": aware(d["at"])}) for d in docs]
 
 
@@ -163,7 +167,7 @@ RESET_PHRASE = "REMISE A ZERO"
 # anti-raid, inactivity rules), the airport data, the frequencies and the bot outbox (the link with the bot).
 RESET_COLLECTIONS = ("flights", "reviews", "review_snoozes", "review_dismissals", "atc_handovers", "reports",
                      "planning", "planning_requests", "absences", "preopenings", "announcements", "simbrief_drafts",
-                     "events")
+                     "events", "flight_tracks")
 
 
 class ResetIn(BaseModel):

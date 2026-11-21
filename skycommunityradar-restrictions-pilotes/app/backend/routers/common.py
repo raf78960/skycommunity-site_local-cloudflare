@@ -15,6 +15,7 @@ from lib.control import Ctx, ctx_for
 from lib.engine import REJECT_WINDOW_S, ACTIONS, ACTIVE, step_for, TAXI_PHASES, aware, holding_info, vector_info, VECTOR_PHASES, allowed_actions, compute_position, procedures, rebase, snap_distance, utcnow
 from lib.runways import change_runways, find as find_runway, runway_idents
 from lib.engine import pilot_moves_left
+from lib.tracks import can_replay
 from models.schemas import Access, FlightDetail, FlightSummary, Position, TaxiRoute, UserOut
 
 
@@ -242,18 +243,20 @@ def detail(f: dict, user: dict, now: datetime, ctx: Ctx) -> FlightDetail:
         reject_until=(aware(f.get("takeoff_at")) + timedelta(seconds=REJECT_WINDOW_S)) if f["phase"] == "decollage" and f.get("takeoff_at") else None,
         takeoff_cleared=bool(f.get("takeoff_cleared")) and f["phase"] == "alignement",
         lineup=(f.get("lineup") or {}).get("path") if f["phase"] in ("alignement", "decollage") else None,
+        lineup_backtrack=bool((f.get("lineup") or {}).get("backtrack")) and f["phase"] == "alignement",
         can_edit_profile=active and may_act and f["phase"] not in ("parking", "roulage_arrivee", "atterrissage"),
         toc_nm=next((w["cum_nm"] for w in f["route"] if w.get("ident") == "TOC"), None),
         tod_nm=next((w["cum_nm"] for w in f["route"] if w.get("ident") == "TOD"), None),
         can_edit_strip=active and ctx.can_edit_strip(f),
         can_edit_dep_rwy=active and ctx.can_edit_strip(f) and (f.get("prev_phase") if f["phase"] == "suspendu" else f["phase"]) in DEP_RWY_PHASES,
-        can_edit_arr_rwy=active and ctx.can_edit_strip(f) and (f.get("prev_phase") if f["phase"] == "suspendu" else f["phase"]) not in ARR_RWY_LOCKED,
+        can_edit_arr_rwy=active and (ctx.can_edit_strip(f) or ctx.pilot_can_edit_arr_rwy(f)) and (f.get("prev_phase") if f["phase"] == "suspendu" else f["phase"]) not in ARR_RWY_LOCKED,
         dep_runways=runway_idents(f["departure"]) if active and ctx.can_edit_strip(f) else [],
-        arr_runways=runway_idents(f["arrival"]) if active and ctx.can_edit_strip(f) else [],
+        arr_runways=runway_idents(f["arrival"]) if active and (ctx.can_edit_strip(f) or ctx.pilot_can_edit_arr_rwy(f)) else [],
         holding_point=f.get("holding_point"),
         dep_name=meta.get("dep_name") or f["route"][0].get("name"), arr_name=meta.get("arr_name") or f["route"][-1].get("name"),
         dep_rwy=pi["dep_rwy"], arr_rwy=pi["arr_rwy"],
         has_pdf=bool(meta.get("pdf_url")),
+        can_replay=can_replay(user, f),
     )
 
 
@@ -273,6 +276,7 @@ async def delete_flights_data(ids: list[str]) -> None:
     await db.reviews.delete_many(q)
     await db.review_snoozes.delete_many(q)
     await db.review_dismissals.delete_many(q)
+    await db.flight_tracks.delete_many(q)  # replay track (lib/tracks)
     await db.atc_handovers.delete_many(q)
 
 

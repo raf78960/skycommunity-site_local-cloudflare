@@ -17,18 +17,25 @@ from lib.events import log_event
 from models.schemas import (HistoryEntry, Interaction, PublicProfile, PublicReview, Review, ReviewDecisionIn,
                             ReviewIn)
 from routers.common import avatar_url
+from lib.tracks import is_staff
 
 router = APIRouter(tags=["community"])
 REVIEW_WINDOW = timedelta(hours=24)  # after the end of the flight, while it is still fresh in mind
 CLOSED = ["termine", "annule"]
 
 
-async def _controllers_of(flight_id: str) -> dict[str, str]:
-    """Controllers who really acted on the flight (journal entries written in ATC role)."""
+async def _controllers_of(f: dict) -> dict[str, str]:
+    """Controllers of the flight: those who acted on it (journal entries written in ATC role) AND those who were
+    responsible for it at some point (f["controllers"], recorded by the engine tick) — e.g. the approach / tower at
+    the arrival, who often control without clicking anything on the site."""
     out: dict[str, str] = {}
-    async for e in db.events.find({"flight_id": flight_id, "actor_role": "atc", "actor_id": {"$ne": None}},
+    async for e in db.events.find({"flight_id": f["id"], "actor_role": "atc", "actor_id": {"$ne": None}},
                                   {"_id": 0, "actor_id": 1, "actor_name": 1}):
         out[e["actor_id"]] = e["actor_name"]
+    missing = [c for c in (f.get("controllers") or []) if c not in out]
+    if missing:
+        async for u in db.users.find({"id": {"$in": missing}}, {"_id": 0, "id": 1, "display_name": 1}):
+            out[u["id"]] = u["display_name"]
     return out
 
 
@@ -39,16 +46,16 @@ async def _interactions(user: dict) -> list[Interaction]:
     out: list[Interaction] = []
     # as a pilot: every controller who acted on my finished flights
     async for f in db.flights.find({"pilot_id": user["id"], "phase": "termine", "updated_at": {"$gte": since}}, {"_id": 0}):
-        for cid, cname in (await _controllers_of(f["id"])).items():
+        for cid, cname in (await _controllers_of(f)).items():
             if cid != user["id"]:
                 out.append(Interaction(flight_id=f["id"], callsign=f["callsign"], departure=f["departure"],
                                        arrival=f["arrival"], target_id=cid, target_name=cname, target_role="atc",
                                        at=aware(f["updated_at"])))
-    # as a controller: pilots of the finished flights I acted on
+    # as a controller: pilots of the finished flights I acted on, or was responsible for (arrival included)
     ids = await db.events.distinct("flight_id", {"actor_id": user["id"], "actor_role": "atc",
                                                  "at": {"$gte": since - timedelta(days=2)}})  # long flights included
-    async for f in db.flights.find({"id": {"$in": [i for i in ids if i]}, "phase": "termine", "updated_at": {"$gte": since}},
-                                   {"_id": 0}):
+    async for f in db.flights.find({"$or": [{"id": {"$in": [i for i in ids if i]}}, {"controllers": user["id"]}],
+                                    "phase": "termine", "updated_at": {"$gte": since}}, {"_id": 0}):
         if f["pilot_id"] != user["id"]:
             out.append(Interaction(flight_id=f["id"], callsign=f["callsign"], departure=f["departure"],
                                    arrival=f["arrival"], target_id=f["pilot_id"], target_name=f["pilot_name"],
@@ -157,6 +164,24 @@ async def public_profile(user_id: str, user: dict = Depends(require("flight:read
         can_delete=user.get("role") == "admin" and u["id"] != user["id"] and not acc["creator"]
                    and (not acc["admin"] or access_of(user)["creator"]),
     )
+
+
+@router.get("/users/{user_id}/flights", response_model=list[HistoryEntry])
+async def user_flights(user_id: str, user: dict = Depends(require("flight:read"))):
+    """Flights of one member, for the replay: the member himself, the responsables and the administrators."""
+    if user_id != user["id"] and not is_staff(user):
+        raise HTTPException(403, "Réservé au membre lui-même, aux responsables et aux administrateurs.")
+    docs = await db.flights.find({"pilot_id": user_id}, {"_id": 0, "route": 0, "taxi_out": 0, "taxi_in": 0}) \
+        .sort("created_at", -1).to_list(100)
+    out = []
+    for f in docs:
+        off, on = aware(f.get("block_off_at")), aware(f.get("block_on_at"))
+        out.append(HistoryEntry(id=f["id"], callsign=f["callsign"], pilot_id=f["pilot_id"], pilot_name=f["pilot_name"],
+                                aircraft_type=f["aircraft_type"], departure=f["departure"], arrival=f["arrival"],
+                                phase=f["phase"], departed_at=off, arrived_at=on,
+                                duration_min=int((on - off).total_seconds() // 60) if off and on else None,
+                                created_at=aware(f["created_at"])))
+    return out
 
 
 @router.get("/history", response_model=list[HistoryEntry])

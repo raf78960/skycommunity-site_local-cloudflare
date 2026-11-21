@@ -44,7 +44,7 @@ function UtcClock() {
   }, []);
   const online = q.isSuccess;
   return (
-    <div className="flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-1.5 py-1 font-mono text-xs sm:gap-2 sm:px-2.5 sm:text-sm" data-testid="utc-clock" title="UTC">
+    <div className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-background/60 px-1.5 font-mono text-xs sm:gap-2 sm:px-2.5 sm:text-sm" data-testid="utc-clock" title="UTC">
       <span className={cn("h-2 w-2 rounded-full sync-dot", online ? "bg-emerald-400" : "bg-red-400")} data-testid="sync-status" data-online={online} title={online ? tr("Synchronisé") : tr("Hors ligne — reconnexion…")} />
       <span className="tabular-nums tracking-wider" data-testid="server-time">
         {new Date(now + offset).toISOString().slice(11, 19)}
@@ -189,14 +189,14 @@ function ModeSwitch({ user, mode }: { user: User; mode: UiMode }) {
   return (
     <div className="relative z-[80]" data-testid="mode-switch">
       {/* Mobile / tablette : menu déroulant bien tappable (évite le bug sur le radar) */}
-      <div className="relative sm:hidden">
+      <div className="relative xl:hidden">
         <button
           type="button"
           disabled={busy}
           onClick={() => setOpen((o) => !o)}
           aria-haspopup="listbox"
           aria-expanded={open}
-          className="flex min-h-10 items-center gap-1.5 rounded-lg border border-border bg-background/90 px-2.5 py-1.5 text-sm font-semibold text-foreground shadow-sm backdrop-blur"
+          className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-background/90 px-2.5 py-1.5 text-sm font-semibold text-foreground shadow-sm backdrop-blur"
           data-testid="mode-switch-mobile-trigger"
         >
           <span className="max-w-[7.5rem] truncate">{labelOf(current)}</span>
@@ -230,7 +230,7 @@ function ModeSwitch({ user, mode }: { user: User; mode: UiMode }) {
         )}
       </div>
       {/* Desktop : pastilles horizontales */}
-      <div className="relative hidden flex-wrap rounded-lg border border-border bg-background/60 p-0.5 text-sm sm:flex" role="radiogroup">
+      <div className="relative hidden h-9 grid-flow-col auto-cols-fr rounded-lg border border-border bg-background/60 p-0.5 text-sm xl:grid" role="radiogroup">
         {options.map((m) => (
           <button
             key={m}
@@ -239,7 +239,7 @@ function ModeSwitch({ user, mode }: { user: User; mode: UiMode }) {
             onClick={() => pick(m)}
             disabled={busy}
             className={cn(
-              "relative z-10 flex items-center gap-1 rounded-md px-2 py-1 font-semibold transition-colors duration-200 sm:px-3",
+              "relative z-10 flex items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 font-semibold transition-colors duration-200 sm:px-3",
               current === m ? "text-white" : "text-muted-foreground hover:text-foreground",
             )}
             data-testid={`mode-switch-${m}`}
@@ -266,7 +266,7 @@ function LogoutButton() {
   return confirm ? (
     <button
       onClick={() => endSession()}
-      className="whitespace-nowrap rounded-md bg-red-500/90 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors duration-150 hover:bg-red-500"
+      className="h-9 whitespace-nowrap rounded-md bg-red-500/90 px-2.5 text-xs font-semibold text-white transition-colors duration-150 hover:bg-red-500"
       data-testid="logout-confirm-button"
     >
       <span className="hidden sm:inline">{tr("Confirmer la déconnexion")}</span>
@@ -275,7 +275,7 @@ function LogoutButton() {
   ) : (
     <button
       onClick={() => setConfirm(true)}
-      className="rounded-md p-2 text-muted-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
       title={tr("Se déconnecter")}
       data-testid="logout-button"
     >
@@ -394,7 +394,7 @@ function NotifBell({ user }: { user: User }) {
       <button
         type="button"
         onClick={toggle}
-        className="relative rounded-md p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        className="relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
         title={unread > 0 ? tr("{0} nouvelle(s) notification(s)", [unread]) : tr("Notifications")}
       >
         <Bell className="h-5 w-5" />
@@ -474,7 +474,7 @@ function TopBar({ user, mode }: { user: User | undefined; mode: UiMode }) {
           href={DONATE_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-gradient-to-r from-pink-600 to-rose-500 p-2 text-xs font-semibold text-white shadow-sm transition-[transform,filter] duration-150 hover:-translate-y-0.5 hover:brightness-110 lg:px-3 lg:py-1.5 lg:text-sm"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center gap-1.5 rounded-md bg-gradient-to-r from-pink-600 to-rose-500 text-xs font-semibold text-white shadow-sm transition-[transform,filter] duration-150 hover:-translate-y-0.5 hover:brightness-110 lg:w-auto lg:px-3 lg:text-sm"
           title={tr("Soutenir le projet")}
           aria-label={tr("Soutenir le projet")}
           data-testid="header-donate-link"
@@ -486,7 +486,7 @@ function TopBar({ user, mode }: { user: User | undefined; mode: UiMode }) {
           href={DISCORD_INVITE}
           target="_blank"
           rel="noopener noreferrer"
-          className="hidden rounded-md bg-[#5865F2] p-2 text-white transition-[background-color,transform] duration-150 hover:-translate-y-0.5 hover:bg-[#4752C4] sm:block"
+          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[#5865F2] text-white transition-[background-color,transform] duration-150 hover:-translate-y-0.5 hover:bg-[#4752C4] sm:flex"
           title={tr("Serveur Discord SkyCommunity")}
           data-testid="header-discord-link"
         >
@@ -495,16 +495,15 @@ function TopBar({ user, mode }: { user: User | undefined; mode: UiMode }) {
         {user && (
           <Link to="/profile" className="hidden items-center gap-2 lg:flex" title={tr("Mon profil")} data-testid="current-user">
             {user.avatar_url ? (
-              <img src={user.avatar_url} alt="" className="h-8 w-8 rounded-full ring-1 ring-border" />
+              <img src={user.avatar_url} alt="" className="h-9 w-9 rounded-full ring-1 ring-border" />
             ) : (
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-sm font-bold">{user.display_name.slice(0, 1).toUpperCase()}</span>
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-secondary text-sm font-bold">{user.display_name.slice(0, 1).toUpperCase()}</span>
             )}
           </Link>
         )}
         {user && <NotifBell user={user} />}
         <LogoutButton />
       </div>
-      <ThemeGarland className="absolute inset-x-0 top-full z-50 h-[36px]" />
     </header>
   );
 }
@@ -706,6 +705,8 @@ export default function AppShell({ children }: { children: (user: User, mode: Ui
     <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar user={me.data} mode={mode} />
       {me.data && mode === "atc" && ["atc", "admin", "instructeur"].includes(me.data.role) && <AtisBanner />}{/* ATIS des aéroports contrôlés */}
+      {/* seasonal garland: its own thin strip under the top bar and the ATIS, never drawn over information */}
+      <ThemeGarland className="h-[18px] shrink-0" />
       <div className="flex min-h-0 flex-1">
         {me.data && <Sidebar user={me.data} mode={mode} />}
         <motion.main key={loc.pathname} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} className="isolate min-h-0 min-w-0 flex-1 overflow-y-auto">{/* isolate: nothing on a page (map search, banners) can cover the top bar and its menus */}

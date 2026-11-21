@@ -59,6 +59,10 @@ class NudgeIn(BaseModel):
     version: int
     delta_nm: float | None = Field(default=None, ge=-200, le=200)
     waypoint: Literal["prev", "next"] | None = None
+    # recalage sur un point de la route : l'avion est placé à `from_nm` NM du point `from_index`
+    # (négatif = avant le point, positif = après le point)
+    from_index: int | None = Field(default=None, ge=0)
+    from_nm: float | None = Field(default=None, ge=-500, le=500)
 
 
 class ModeIn(BaseModel):
@@ -73,7 +77,7 @@ class NavIn(BaseModel):
     turns: int | None = Field(default=None, ge=1, le=20)  # None = jusqu'à nouvel ordre
     # radar vector (controllers only): heading, side of the turn (None = shortest), level and speed (None = unchanged)
     heading: int | None = Field(default=None, ge=1, le=360)
-    turn: Literal["left", "right"] | None = None
+    turn: Literal["left", "right"] | None = None  # vector: side of the turn · hold: side of the racetrack turns (None = right, standard)
     altitude_ft: int | None = Field(default=None, ge=1000, le=45000)
     speed_kt: int | None = Field(default=None, ge=140, le=450)
 
@@ -281,6 +285,7 @@ class FlightDetail(FlightSummary):
     holding: dict | None = None  # attente en cours / demandée (engine.holding_info)
     reject_until: datetime | None = None  # take-off can be interrupted until then (1 min)
     takeoff_cleared: bool = False  # lining up, then take-off by itself
+    lineup_backtrack: bool = False  # « Remonter la piste » : backtrack to the runway end before lining up
     lineup: list[list[float]] | None = None  # move TOC / TOD (the pilot of the flight, or whoever is in charge of it)
     toc_nm: float | None = None
     tod_nm: float | None = None
@@ -292,6 +297,7 @@ class FlightDetail(FlightSummary):
     dep_rwy: str | None = None
     arr_rwy: str | None = None
     has_pdf: bool = False
+    can_replay: bool = False  # replay: the pilot of the flight, the responsables and the administrators
 
 
 class FlightsResponse(BaseModel):
@@ -329,6 +335,7 @@ class ActionIn(BaseModel):
     version: int
     pushback_dir: Literal["N", "NE", "E", "SE", "S", "SW", "W", "NW"] | None = None
     pushback_to: LatLon | None = None  # where the tug leaves the aircraft (clicked on the map)
+    circuit: Literal["left", "right"] | None = None  # go-around: left- or right-hand circuit (None = side of the runway)
     # take-off interrupted: points clicked from the exit taxiway on, then the new holding point or the stand
     taxi_points: list[LatLonPoint] = Field(default_factory=list, max_length=30)
     holding_ref: str | None = Field(default=None, max_length=40)

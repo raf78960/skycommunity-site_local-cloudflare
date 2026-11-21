@@ -323,6 +323,8 @@ export interface FlightDetail extends FlightSummary {
   takeoff_cleared?: boolean;
   reject_until?: string | null;
   lineup?: number[][] | null;
+  lineup_backtrack?: boolean;
+  can_replay?: boolean; // the pilot of the flight, the responsables and the administrators
   toc_nm?: number | null;
   tod_nm?: number | null;
   can_edit_strip: boolean;
@@ -643,6 +645,7 @@ export interface PlanningSlot {
 export interface Holding_ {
   ident: string;
   turns: number | null;
+  turn?: "left" | "right"; // side of the racetrack turns (right = standard)
   laps_done: number;
   entered: boolean;
   exit: boolean;
@@ -674,4 +677,27 @@ export interface AtisInfo {
   metar_source?: string | null;
   elevation_ft?: number | null;
   iata?: string | null;
+}
+/** Replay of a flight (GET /flights/{id}/replay). samples: [time ms, lat, lon, alt ft, heading, phase, on ground] */
+export type ReplaySample = [number, number, number, number, number, string, boolean];
+export interface ReplayEvent {
+  at: string;
+  type: string;
+  label: string;
+  details: string | null;
+  actor_name: string | null;
+  actor_role: string | null;
+}
+export interface FlightReplay {
+  id: string;
+  callsign: string;
+  pilot_id: string;
+  pilot_name: string | null;
+  aircraft_type: string | null;
+  departure: string;
+  arrival: string;
+  phase: string;
+  route: [number, number, string | null][];
+  samples: ReplaySample[];
+  events: ReplayEvent[];
 }

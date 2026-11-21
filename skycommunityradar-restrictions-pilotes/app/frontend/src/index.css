@@ -103,7 +103,7 @@
 /* ---- Radar map ---- */
 /* touch-action: none = Leaflet gère pinch + pan ; la molette / trackpad zooment le radar (pas la page) */
 .leaflet-container {
-  background: #161B26 !important;
+  background: var(--sc-map-bg) !important;
   font-family: var(--font-mono);
   touch-action: none;
   -ms-touch-action: none;
@@ -203,6 +203,8 @@
 /* aircraft glide between server positions (disabled during zoom so markers never drift) */
 .leaflet-marker-icon.ac-marker { transition: transform 1.8s linear; }
 .map-zooming .leaflet-marker-icon.ac-marker { transition: none; }
+/* replay: the aircraft is moved many times per second, no gliding (it would lag behind) */
+.replay-map .leaflet-marker-icon.ac-marker, .replay-map .ac-icon svg { transition: none; }
 
 /* Login backdrop: slow radar sweep (disabled for users who prefer reduced motion) */
 .radar-sweep {
@@ -225,32 +227,38 @@ button, a, [role="tab"] { -webkit-tap-highlight-color: transparent; }
 
 /* ---- Thèmes saisonniers (choisis par le Créateur dans Administration) ----
    Les couleurs de l'interface passent par ces variables : un thème les remplace toutes d'un coup.
-   La carte (fond, avions, tracés) garde ses couleurs pour rester lisible. */
+   Le fond de carte suit le thème (lib/mapStyle.ts) ; avions, tracés, pistes et secteurs gardent leurs couleurs. */
 :root {
   --sc-accent: #4AA8F0; --sc-accent-soft: #7CC0F5; --sc-accent-softer: #9CCBF5;
   --sc-primary: #2B63C9; --sc-primary-hover: #3572DB;
   --sc-topbar: #070D1A; --sc-sidebar: #0A1222; --sc-panel: #0B1220; --sc-glow: #12264A; --sc-deep: #04070F;
+  --sc-map-bg: #161B26; /* behind the map tiles while they load (same family as the map background of the theme) */
 }
 
 html[data-theme="noel"] {
+  --sc-map-bg: #0B1711;
+  /* boutons principaux en vert sapin : le rouge reste réservé aux boutons d'arrêt / danger (Stop roulage…) */
   --sc-accent: #3FCB72; --sc-accent-soft: #F4C95D; --sc-accent-softer: #FBE3A4;
-  --sc-primary: #C62828; --sc-primary-hover: #E53935;
+  --sc-primary: #1B7F45; --sc-primary-hover: #229454;
   --sc-topbar: #0A140F; --sc-sidebar: #0C1913; --sc-panel: #0D1A14; --sc-glow: #1E3B2A; --sc-deep: #050B08;
-  --background: #08120D; --card: #0F1F17; --popover: #0F1F17; --primary: #C62828; --secondary: #17301F;
+  --background: #08120D; --card: #0F1F17; --popover: #0F1F17; --primary: #1B7F45; --secondary: #17301F;
   --muted: #17301F; --accent: #1C3826; --border: #24452F; --input: #2E5A3D; --ring: #3FCB72;
   --sidebar: #0F1F17; --sidebar-primary: #3FCB72; --sidebar-accent: #17301F; --sidebar-border: #24452F; --chart-1: #3FCB72;
   --color-sky-100: #FFF4D6; --color-sky-200: #FBE3A4; --color-sky-300: #F4C95D; --color-sky-500: #E0A82E; --color-sky-700: #8A6414;
 }
 html[data-theme="halloween"] {
+  --sc-map-bg: #110A19;
+  /* boutons principaux en violet : l'orange reste pour les accents, le rouge pour les boutons d'arrêt / danger */
   --sc-accent: #FF8A2A; --sc-accent-soft: #C99BFF; --sc-accent-softer: #E2CCFF;
-  --sc-primary: #D9480F; --sc-primary-hover: #F76707;
+  --sc-primary: #7C3AED; --sc-primary-hover: #8B5CF6;
   --sc-topbar: #0C0612; --sc-sidebar: #12091B; --sc-panel: #140A1E; --sc-glow: #3A1352; --sc-deep: #050208;
-  --background: #0B0610; --card: #170D22; --popover: #170D22; --primary: #D9480F; --secondary: #24123A;
+  --background: #0B0610; --card: #170D22; --popover: #170D22; --primary: #7C3AED; --secondary: #24123A;
   --muted: #24123A; --accent: #2C1646; --border: #3B1F57; --input: #4D2A70; --ring: #FF8A2A;
   --sidebar: #170D22; --sidebar-primary: #FF8A2A; --sidebar-accent: #24123A; --sidebar-border: #3B1F57; --chart-1: #FF8A2A;
   --color-sky-100: #F3E8FF; --color-sky-200: #E2CCFF; --color-sky-300: #C99BFF; --color-sky-500: #A855F7; --color-sky-700: #6B21A8;
 }
 html[data-theme="paques"] {
+  --sc-map-bg: #111024;
   --sc-accent: #FF8FC4; --sc-accent-soft: #8FE3C0; --sc-accent-softer: #FFE59A;
   --sc-primary: #C2508F; --sc-primary-hover: #D96AA6;
   --sc-topbar: #0E0C1D; --sc-sidebar: #131128; --sc-panel: #15132D; --sc-glow: #3B2E70; --sc-deep: #07060F;

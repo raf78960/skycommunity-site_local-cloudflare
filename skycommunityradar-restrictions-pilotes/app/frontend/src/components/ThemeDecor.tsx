@@ -40,7 +40,7 @@ const rnd = (n: number) => {
 function LightString() {
   const W = 56, N = 80;
   return (
-    <svg width={W * N} height={24} className="block">
+    <svg viewBox={`0 0 ${W * N} 24`} preserveAspectRatio="xMinYMin meet" className="block h-full w-auto">
       {Array.from({ length: N }, (_, i) => {
         const x = i * W, c = LIGHTS[i % LIGHTS.length];
         return (
@@ -74,7 +74,7 @@ function BloodDrips() {
     }
   }
   return (
-    <svg width={W * N} height={36} className="block">
+    <svg viewBox={`0 0 ${W * N} 36`} preserveAspectRatio="xMinYMin meet" className="block h-full w-auto">
       <defs>
         <linearGradient id="sc-blood" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#5E0000" />
@@ -90,7 +90,7 @@ function BloodDrips() {
 function EggBunting() {
   const W = 60, N = 70;
   return (
-    <svg width={W * N} height={28} className="block">
+    <svg viewBox={`0 0 ${W * N} 28`} preserveAspectRatio="xMinYMin meet" className="block h-full w-auto">
       {Array.from({ length: N }, (_, i) => {
         const x = i * W, cx = x + W / 2, c = EGGS[i % EGGS.length];
         return (

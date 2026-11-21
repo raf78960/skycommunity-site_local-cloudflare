@@ -18,7 +18,7 @@ from lib.control import AIRPORT_ORDER, ONLINE_S
 from lib.db import db
 from lib.engine import aware, utcnow
 from lib.events import log_event
-from lib.handover import accept_handover, close_positions, handover_out, preset_frequency, remember_frequency
+from lib.handover import accept_handover, close_positions, handover_out, handover_rank, preset_frequency, remember_frequency
 from lib import discord_bot_client
 from models.schemas import AirspaceResponse, AtcPosition, AtcPositionIn, FrequencyInfo, Handover, Preopening, PreopeningIn
 from routers.airports import ref_lookup
@@ -559,7 +559,8 @@ async def my_handovers(user: dict = Depends(require("atc:position"))):
 async def accept_my_handovers(user: dict = Depends(require("atc:position"))):
     """« Reprendre maintenant »: takes over every position waiting for this controller."""
     out = []
-    for h in await db.atc_handovers.find({"to_user_id": user["id"]}, {"_id": 0}).to_list(10):
+    pending = await db.atc_handovers.find({"to_user_id": user["id"]}, {"_id": 0}).to_list(10)
+    for h in sorted(pending, key=handover_rank):
         d = await accept_handover(h, automatic=False)
         if d:
             out.append(_out(d))

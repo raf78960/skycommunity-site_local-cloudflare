@@ -10,6 +10,7 @@ const pages = {
   Radar: () => import("@/pages/Radar"),
   Login: () => import("@/pages/Login"),
   FlightDetail: () => import("@/pages/FlightDetail"),
+  Replay: () => import("@/pages/Replay"),
   NewFlight: () => import("@/pages/NewFlight"),
   History: () => import("@/pages/History"),
   Profile: () => import("@/pages/Profile"),
@@ -28,6 +29,7 @@ const pages = {
 const Radar = lazy(pages.Radar);
 const Login = lazy(pages.Login);
 const FlightDetail = lazy(pages.FlightDetail);
+const Replay = lazy(pages.Replay);
 const NewFlight = lazy(pages.NewFlight);
 const History = lazy(pages.History);
 const Profile = lazy(pages.Profile);
@@ -120,6 +122,7 @@ export default function App() {
           <Route path="/mode" element={<Mode />} />
           <Route path="/flights/new" element={<NewFlight />} />
           <Route path="/flights/:id" element={<FlightDetail />} />
+          <Route path="/flights/:id/replay" element={<Replay />} />
           <Route path="/history" element={<History />} />
           <Route path="/airports" element={<Airports />} />
           <Route path="/profile" element={<Profile />} />

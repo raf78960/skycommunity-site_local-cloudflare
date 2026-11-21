@@ -11,6 +11,7 @@ from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 
+from lib import airspace
 from lib.control import AIRPORT_ORDER, ONLINE_S
 from lib.db import db
 from lib.engine import aware, utcnow
@@ -64,7 +65,9 @@ async def close_positions(docs: list[dict], reason: str, actor: dict | None) -> 
         # activity on the network (lib/activity): the controller was on position until now
         await db.users.update_one({"id": d["user_id"]}, {"$set": {"atc_last_active": min(now, aware(d["last_seen"]) or now)}})
         who = actor or {"id": d["user_id"], "display_name": d["controller"], "role": "atc"}
-        label = "Fermeture de position ATC" if reason == "fermeture" else "Position ATC libérée (connexion perdue)"
+        label = ("Fermeture de position ATC" if reason == "fermeture"
+                 else "Position ATC fermée (relève : le contrôleur passe sur la position reprise)" if reason == "releve"
+                 else "Position ATC libérée (connexion perdue)")
         await log_event("atc", label, who, None, d["callsign"])
         await db.atc_handovers.delete_many({"to_position_id": d["id"]})  # it can no longer take anything over
 
@@ -97,14 +100,26 @@ async def close_positions(docs: list[dict], reason: str, actor: dict | None) -> 
                               "callsign": d["callsign"], "frequency": d["frequency"],
                               "from_controller": d["controller"], "to_user_id": q["user_id"],
                               "to_position_id": q["id"],
-                              "reason": "fermeture" if reason == "fermeture" else "connexion perdue",
+                              "reason": "fermeture" if reason in ("fermeture", "releve") else "connexion perdue",
                               "created_at": now, "deadline": now + timedelta(seconds=HANDOVER_S)}},
                     upsert=True)
             break
 
 
+def handover_rank(h: dict) -> int:
+    """One frequency per controller: when several positions wait for the same controller, the highest is taken."""
+    return AIRPORT_ORDER.index(h["position"]) if h.get("position") in AIRPORT_ORDER else 9
+
+
+def tracon_id_for(icao: str) -> str | None:
+    """Real approach boundary (SimAware TRACON) of an airport, as when the APP is opened normally."""
+    t = airspace.match("tracon", icao) or airspace.match("tracon", icao[1:])
+    return t["properties"]["id"] if t else None
+
+
 async def accept_handover(h: dict, automatic: bool) -> dict | None:
-    """The receiving controller now also holds the position (cumul on the same airport)."""
+    """The receiving controller moves to the position taken over: his previous frequency is closed (one frequency
+    at a time, as on Discord) and the new one keeps its real approach boundary."""
     if not await db.atc_handovers.find_one_and_delete({"id": h["id"]}):
         return None
     now = utcnow()
@@ -117,7 +132,21 @@ async def accept_handover(h: dict, automatic: bool) -> dict | None:
     doc = {**{k: holder[k] for k in ("user_id", "controller", "airport", "lat", "lon")},
            "id": str(uuid.uuid4()), "callsign": h["callsign"], "type": h["position"], "frequency": h["frequency"],
            "radius_nm": {"APP": 30.0, "TWR": 8.0, "GND": 3.0}.get(h["position"], 0.0), "fir_id": None,
-           "tracon_id": None, "opened_at": now, "last_seen": now}
+           "tracon_id": tracon_id_for(h["airport"]) if h["position"] == "APP" else None,
+           "languages": holder.get("languages"), "opened_at": now, "last_seen": now}
+    u = await db.users.find_one({"id": holder["user_id"]}, {"_id": 0, "id": 1, "display_name": 1, "discord_id": 1})
+    actor = {"id": holder["user_id"], "display_name": holder["controller"], "role": "atc",
+             "discord_id": (u or {}).get("discord_id")}
+    # 1) the previous frequency is closed first (Discord: one frequency per controller); the position below it, if
+    #    held by someone else, is offered to them in turn.
+    await close_positions([holder], "releve", actor)
+    # 2) the position taken over is opened on Discord like a normal opening
+    if actor["discord_id"]:
+        bot_freq = await discord_bot_client.open_frequency(
+            atc_discord_id=actor["discord_id"], icao=h["airport"], position=h["position"],
+            frequency_mhz=str(h["frequency"]), languages=holder.get("languages") or "🇫🇷 FR")
+        if bot_freq and bot_freq.get("id") is not None:
+            doc["discord_freq_id"] = bot_freq["id"]
     await db.atc_positions.insert_one(dict(doc))
     await log_event("atc", "Relève automatique (2 min)" if automatic else "Relève : position reprise",
                     {"id": holder["user_id"], "display_name": holder["controller"], "role": "atc"}, None,
@@ -132,7 +161,8 @@ async def process(now=None) -> None:
                                         {"_id": 0}).to_list(200)
     if stale:
         await close_positions(stale, "connexion", None)
-    async for h in db.atc_handovers.find({"deadline": {"$lte": now}}, {"_id": 0}):
+    due = await db.atc_handovers.find({"deadline": {"$lte": now}}, {"_id": 0}).to_list(100)
+    for h in sorted(due, key=handover_rank):  # highest position first (APP before TWR before GND)
         await accept_handover(h, automatic=True)
     # handovers whose position was reopened by someone else are pointless
     async for h in db.atc_handovers.find({}, {"_id": 0}):

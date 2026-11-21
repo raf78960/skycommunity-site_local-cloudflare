@@ -6,7 +6,9 @@ import DeleteButton from "@/components/DeleteButton";
 import { apiGet } from "@/lib/api";
 import { errMsg } from "@/lib/hooks";
 import { fmtDateTime } from "@/lib/phases";
-import type { PublicProfile } from "@/lib/types";
+import type { HistoryEntry, PublicProfile, User } from "@/lib/types";
+import { PhaseBadge } from "@/components/Badges";
+import { ReplayLink, canReplay } from "@/lib/replay";
 
 import { tr } from "@/lib/i18n";
 export function Stars({ value, testId }: { value: number | null; testId?: string }) {
@@ -86,7 +88,33 @@ export function usePublicProfile(id: string | undefined) {
   return useQuery<PublicProfile>({ queryKey: ["profile", id], queryFn: () => apiGet<PublicProfile>(`/users/${id}/profile`), enabled: !!id });
 }
 
-function View() {
+/** Flights of the member with their replay: the member himself, the responsables and the administrators. */
+function MemberFlights({ id }: { id: string }) {
+  const q = useQuery<HistoryEntry[]>({ queryKey: ["member-flights", id], queryFn: () => apiGet<HistoryEntry[]>(`/users/${id}/flights`) });
+  if (q.isError) return <p className="text-sm text-red-300">{errMsg(q.error)}</p>;
+  return (
+    <section className="rounded-xl border border-border bg-card p-4" data-testid="member-flights">
+      <h2 className="mb-2 text-sm font-semibold">{tr("Vols et replays")}</h2>
+      {!q.data?.length ? (
+        <p className="text-sm text-muted-foreground">{q.isLoading ? tr("Chargement…") : tr("Aucun vol.")}</p>
+      ) : (
+        <ul className="divide-y divide-border/60">
+          {q.data.map((f) => (
+            <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
+              <Link to={`/flights/${f.id}`} className="font-mono font-semibold text-[color:var(--sc-accent)] hover:underline">{f.callsign}</Link>
+              <span className="font-mono">{f.departure} → {f.arrival}</span>
+              <PhaseBadge phase={f.phase} />
+              <span className="ml-auto font-mono text-xs text-muted-foreground">{fmtDateTime(f.departed_at ?? f.created_at)}</span>
+              <ReplayLink flightId={f.id} label />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function View({ user }: { user: User }) {
   const { id } = useParams();
   const q = usePublicProfile(id);
   const nav = useNavigate();
@@ -96,6 +124,7 @@ function View() {
       {q.isLoading && <p className="text-muted-foreground">{tr("Chargement…")}</p>}
       {q.isError && <p className="text-red-300">{errMsg(q.error)}</p>}
       {q.data && <ProfileCard p={q.data} />}
+      {q.data && id && canReplay(user, id) && <MemberFlights id={id} />}
       {q.data?.can_delete && (
         <div className="flex justify-end">
           <DeleteButton
@@ -112,5 +141,5 @@ function View() {
 }
 
 export default function PilotProfile() {
-  return <AppShell>{() => <View />}</AppShell>;
+  return <AppShell>{(user) => <View user={user} />}</AppShell>;
 }

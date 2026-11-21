@@ -13,6 +13,9 @@ import { loadLang, useLang } from './lib/i18n'
 for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
   document.addEventListener(ev, (e) => e.preventDefault(), { passive: false })
 }
+// Chrome / Firefox / Edge sur ordinateur : le pincement du trackpad arrive comme une molette avec « ctrl » et
+// zoomerait toute la page. On le bloque partout ; sur la carte, Leaflet le reçoit avant et zoome la carte.
+document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault() }, { passive: false })
 
 /** The app is re-rendered once when the language changes (FR / EN); the page and the data stay. */
 function Root() {

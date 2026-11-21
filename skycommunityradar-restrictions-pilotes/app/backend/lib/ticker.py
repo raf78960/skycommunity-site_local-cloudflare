@@ -11,6 +11,7 @@ from datetime import timedelta
 
 from lib import handover
 from lib.control import record_controllers
+from lib.tracks import record_tracks
 from lib.db import db
 from lib.engine import threshold_nm, end_holding, hold_entered_at, leave_holding_at, LINEUP_HOLD_S, PHASES, TRACK_OF, approach_target, compute_position, enter_phase, lined_up_since, utcnow
 from lib.events import log_event
@@ -131,4 +132,8 @@ async def run_forever() -> None:
             await record_controllers(utcnow())  # « vols contrôlés » of each controller
         except Exception as exc:
             logger.exception("ATC handover tick failed: %s", exc)
+        try:
+            await record_tracks(utcnow())  # positions for the replay of the flights
+        except Exception as exc:
+            logger.exception("track recording failed: %s", exc)
         await asyncio.sleep(interval)

@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   MoveRight,
   ChevronLeft, ChevronRight, CircleX, Flag, Hand, Headset, Info, MoveDown, Navigation, Pause, PlaneLanding,
-  PlaneTakeoff, Play, Route, ShieldCheck, SquareParking, Undo2,
+  PlaneTakeoff, Play, Redo2, Route, ShieldCheck, SquareParking, Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiPost } from "@/lib/api";
@@ -27,14 +27,19 @@ const DIRS = [
   ["SW", "Sud-Ouest"], ["S", "Sud"], ["SE", "Sud-Est"],
 ] as const;
 const ICONS: Record<string, LucideIcon> = {
-  repoussage: MoveDown, roulage: Route, point_attente: Hand, alignement: MoveRight, decollage: PlaneTakeoff, approche: Navigation,
+  repoussage: MoveDown, roulage: Route, point_attente: Hand, alignement: MoveRight, remonter_piste: Undo2, decollage: PlaneTakeoff, approche: Navigation,
   go_around: Undo2, atterrissage: PlaneLanding, roulage_arrivee: Route, parking: SquareParking, reprendre: Play,
   suspendre: Pause, terminer: Flag, annuler: CircleX, interrompre_decollage: Undo2, retour_parking: SquareParking, retour_poste: SquareParking, repartir: PlaneTakeoff,
 };
 // actions that end or interrupt the flight: kept apart, in red, never next to the normal progression
 const DANGER = new Set(["annuler", "suspendre"]);
 
-type Pending = { label: string; danger: boolean; run: () => void };
+type Circuit = "left" | "right";
+// go-around: the side of the circuit is chosen in the confirmation (run receives it)
+type Pending = { label: string; danger: boolean; run: (circuit?: Circuit) => void; circuit?: boolean };
+
+/** Highlighted in green: very visible, whatever the theme (the taxi to the gate after landing). */
+const GREEN_ACTIONS = new Set(["roulage_arrivee"]);
 
 function Notice({ tone, icon: Icon, children, testId }: { tone: "info" | "ok" | "muted"; icon: LucideIcon; children: ReactNode; testId: string }) {
   return (
@@ -87,18 +92,22 @@ function StepButton({ dir, to, onClick, disabled }: { dir: "prev" | "next"; to: 
 export default function FlightActions({ flight, ed, part }: { flight: FlightDetail; ed?: FlightEditing; part?: "main" | "end" }) {
   const m = useFlightMutation(flight.id);
   const [pending, setPending] = useState<Pending | null>(null);
+  // default circuit side: right for a « R » runway, left otherwise (usual rule), changeable before confirming
+  const [circuit, setCircuit] = useState<Circuit>("left");
   const [askPush, setAskPush] = useState(false);
   const [reject, setReject] = useState<null | "interrompre_decollage" | "retour_parking">(null);
   // the server decides who may act: allowed_actions is empty for anybody who is not in charge of this flight
   const locked = flight.allowed_actions.length === 0 && !flight.can_control;
   const canStep = ACTIVE.has(flight.phase) && flight.phase !== "suspendu" && !locked;
   const progress = flight.allowed_actions.filter((a) => !DANGER.has(a.code));
-  const uniqProgress = progress.filter((a, i, arr) => arr.findIndex((x) => x.code === a.code) === i);
+  // after landing, taxiing to the gate is the normal next step: it comes first, before the go-around
+  const uniqProgress = progress.filter((a, i, arr) => arr.findIndex((x) => x.code === a.code) === i)
+    .sort((x, y) => Number(GREEN_ACTIONS.has(y.code)) - Number(GREEN_ACTIONS.has(x.code)));
   const danger = flight.allowed_actions.filter((a) => DANGER.has(a.code));
   const notStarted = flight.position.distance_nm === 0; // waiting at the start of its route (exit after an interrupted take-off)
 
-  const action = (code: string, label: string, extra: Record<string, string> = {}) => () =>
-    m.mutate({ fn: () => apiPost<FlightDetail>(`/flights/${flight.id}/actions`, { action: code, version: flight.version, ...extra }), success: label });
+  const action = (code: string, label: string, extra: Record<string, string> = {}) => (circ?: Circuit) =>
+    m.mutate({ fn: () => apiPost<FlightDetail>(`/flights/${flight.id}/actions`, { action: code, version: flight.version, ...extra, ...(circ ? { circuit: circ } : {}) }), success: label });
   const step = (direction: "prev" | "next") => () =>
     m.mutate({
       fn: () => apiPost<FlightDetail>(`/flights/${flight.id}/step`, { direction, version: flight.version }),
@@ -109,6 +118,9 @@ export default function FlightActions({ flight, ed, part }: { flight: FlightDeta
       ? setReject(a.code)
       : a.code === "repoussage"
       ? setAskPush(true)
+      : a.code === "go_around"
+      ? (setCircuit(String(flight.arr_rwy ?? "").toUpperCase().endsWith("R") ? "right" : "left"),
+        setPending({ label: tr(a.label), danger: false, circuit: true, run: action(a.code, tr(a.label)) }))
       : setPending({ label: tr(a.label), danger: DANGER.has(a.code), run: action(a.code, tr(a.label)) }); // every step asks first
 
   const confirmBox = pending && (
@@ -123,6 +135,31 @@ export default function FlightActions({ flight, ed, part }: { flight: FlightDeta
           >
             <p className="text-sm font-semibold">{tr("Confirmer : {0}", [pending.label])}</p>
             <p className="text-xs text-muted-foreground">{tr("Cette action est enregistrée dans l'historique du vol et visible par tous.")}</p>
+            {pending.circuit && (
+              <div className="space-y-1.5" data-testid="go-around-circuit">
+                <p className="text-xs font-semibold">{tr("Tour de piste")}</p>
+                <div className="grid grid-cols-2 gap-2" role="radiogroup">
+                  {(["left", "right"] as const).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      role="radio"
+                      aria-checked={circuit === c}
+                      onClick={() => setCircuit(c)}
+                      className={cn(
+                        "flex h-10 items-center justify-center gap-1.5 rounded-lg border text-sm font-semibold transition-colors",
+                        circuit === c
+                          ? "border-[color:var(--sc-accent)] bg-[color:var(--sc-primary)] text-white"
+                          : "border-border bg-background/60 text-muted-foreground hover:text-foreground",
+                      )}
+                      data-testid={`go-around-${c}`}
+                    >
+                      {c === "left" ? <><Undo2 className="h-4 w-4" /> {tr("Main gauche")}</> : <>{tr("Main droite")} <Redo2 className="h-4 w-4" /></>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" size="lg" type="button" onClick={() => setPending(null)} data-testid="confirm-cancel">{tr("Retour")}</Button>
               <Button
@@ -132,7 +169,7 @@ export default function FlightActions({ flight, ed, part }: { flight: FlightDeta
                 onClick={() => {
                   const p = pending;
                   setPending(null);
-                  p.run();
+                  p.run(p.circuit ? circuit : undefined);
                 }}
                 data-testid="confirm-ok"
               >{tr("Confirmer")}</Button>
@@ -173,7 +210,11 @@ export default function FlightActions({ flight, ed, part }: { flight: FlightDeta
       )}
       {flight.phase === "alignement" && (
         <Notice tone="info" icon={MoveRight} testId="lineup-notice">
-          {flight.takeoff_cleared
+          {flight.lineup_backtrack && flight.position.distance_nm < flight.position.total_nm - 0.001
+            ? flight.takeoff_cleared
+              ? tr("Remontée de la piste : demi-tour au bout, alignement, puis décollage automatique.")
+              : tr("Remontée de la piste : demi-tour au bout puis alignement. Décollage sur autorisation.")
+            : flight.takeoff_cleared
             ? tr("Autorisé au décollage : l'avion s'aligne sur la piste puis décolle tout seul.")
             : tr("Aligné et en attente sur la piste : décollage sur autorisation.")}
         </Notice>
@@ -284,7 +325,9 @@ export default function FlightActions({ flight, ed, part }: { flight: FlightDeta
                       onClick={() => click(a)}
                       className={cn(
                         "flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold shadow-sm transition-colors disabled:opacity-50",
-                        i === 0
+                        GREEN_ACTIONS.has(a.code)
+                          ? "bg-emerald-600 text-white shadow-emerald-600/30 hover:bg-emerald-500"
+                          : i === 0
                           ? "bg-[color:var(--sc-primary)] text-white shadow-[color:var(--sc-primary)]/30 hover:bg-[color:var(--sc-primary-hover)]"
                           : "border border-[color:var(--sc-primary)]/50 bg-[color:var(--sc-primary)]/10 text-[color:var(--sc-accent-softer)] hover:bg-[color:var(--sc-primary)]/20",
                         progress.length % 2 === 1 && i === 0 && progress.length > 1 && "col-span-2",

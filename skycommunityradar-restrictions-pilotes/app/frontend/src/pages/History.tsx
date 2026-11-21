@@ -6,7 +6,8 @@ import { PhaseBadge } from "@/components/Badges";
 import { apiGet } from "@/lib/api";
 import { errMsg } from "@/lib/hooks";
 import { fmtDateTime } from "@/lib/phases";
-import type { FlightSummary, HistoryEntry } from "@/lib/types";
+import type { FlightSummary, HistoryEntry, User } from "@/lib/types";
+import { ReplayLink, canReplay } from "@/lib/replay";
 
 import { tr } from "@/lib/i18n";
 /** Kept for the profile page ("mes vols"). */
@@ -19,6 +20,7 @@ export function FlightTable({ flights, testId }: { flights: FlightSummary[]; tes
           <th className="font-normal">{tr("Trajet")}</th>
           <th className="font-normal">{tr("Statut")}</th>
           <th className="font-normal">{tr("Mis à jour")}</th>
+          <th className="font-normal">{tr("Replay")}</th>
         </tr>
       </thead>
       <tbody>
@@ -30,6 +32,7 @@ export function FlightTable({ flights, testId }: { flights: FlightSummary[]; tes
             <td className="font-mono">{f.departure} → {f.arrival}</td>
             <td><PhaseBadge phase={f.phase} /></td>
             <td className="font-mono text-muted-foreground">{fmtDateTime(f.updated_at)}</td>
+            <td><ReplayLink flightId={f.id} /></td>
           </tr>
         ))}
       </tbody>
@@ -40,7 +43,7 @@ export function FlightTable({ flights, testId }: { flights: FlightSummary[]; tes
 const fmtDur = (m: number | null) => (m == null ? "—" : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`);
 
 /** Flight history: ATC + admin only (enforced by the API). Finished and cancelled flights. */
-function View() {
+function View({ user }: { user: User }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "termine" | "annule">("all");
   const [airport, setAirport] = useState("");
@@ -64,7 +67,10 @@ function View() {
         {h.data?.map((f) => (
           <li key={f.id} className="rounded-xl border border-border bg-card p-3 text-sm">
             <div className="flex items-center justify-between gap-2">
-              <Link to={`/flights/${f.id}`} className="font-mono text-base font-semibold text-[color:var(--sc-accent)]">{f.callsign}</Link>
+              <span className="flex items-center gap-2">
+                <Link to={`/flights/${f.id}`} className="font-mono text-base font-semibold text-[color:var(--sc-accent)]">{f.callsign}</Link>
+                {canReplay(user, f.pilot_id) && <ReplayLink flightId={f.id} />}
+              </span>
               <PhaseBadge phase={f.phase} />
             </div>
             <div className="mt-1 flex items-center justify-between gap-2 font-mono">
@@ -91,7 +97,12 @@ function View() {
             {h.data?.map((f) => (
               <tr key={f.id} className="border-b border-border/50 transition-colors duration-150 hover:bg-accent/40" data-testid={`history-row-${f.callsign}`}>
                 <td className="px-3 py-2.5"><Link to={`/pilotes/${f.pilot_id}`} className="hover:text-[color:var(--sc-accent)]">{f.pilot_name}</Link></td>
-                <td className="px-3 font-mono font-semibold"><Link to={`/flights/${f.id}`} className="text-[color:var(--sc-accent)] hover:underline">{f.callsign}</Link></td>
+                <td className="px-3 font-mono font-semibold">
+                  <span className="flex items-center gap-2">
+                    <Link to={`/flights/${f.id}`} className="text-[color:var(--sc-accent)] hover:underline">{f.callsign}</Link>
+                    {canReplay(user, f.pilot_id) && <ReplayLink flightId={f.id} />}
+                  </span>
+                </td>
                 <td className="px-3 font-mono">{f.departure}</td>
                 <td className="px-3 font-mono">{f.arrival}</td>
                 <td className="px-3 font-mono text-muted-foreground">{f.departed_at ? fmtDateTime(f.departed_at) : "—"}</td>
@@ -109,5 +120,5 @@ function View() {
 }
 
 export default function History() {
-  return <AppShell>{() => <View />}</AppShell>;
+  return <AppShell>{(user) => <View user={user} />}</AppShell>;
 }

@@ -95,6 +95,8 @@ INDEXES: dict[str, list[IndexModel]] = {
         IndexModel([("user_id", ASCENDING), ("status", ASCENDING)], name="user_status"),
     ],
     "ground": [IndexModel([("icao", ASCENDING)], name="icao", unique=True)],
+    # replay: the recorded positions of each flight, read in time order (lib/tracks)
+    "flight_tracks": [IndexModel([("flight_id", ASCENDING), ("t", ASCENDING)], name="flight_t")],
     "simbrief_drafts": [
         IndexModel([("id", ASCENDING)], name="id", unique=True),
         IndexModel([("created_at", ASCENDING)], name="ttl", expireAfterSeconds=3600),

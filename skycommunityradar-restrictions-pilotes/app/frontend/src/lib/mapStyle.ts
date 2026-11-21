@@ -1,4 +1,5 @@
-import type { StyleSpecification } from "maplibre-gl";
+import type { Map as GlMap, StyleSpecification } from "maplibre-gl";
+import type { SiteTheme } from "@/lib/theme";
 
 /** Aviation-oriented dark style on OpenFreeMap vector tiles (OpenMapTiles schema, © OpenStreetMap).
  * No streets, shops or POIs: water, country/state borders (dashed), cities in LATIN script,
@@ -87,11 +88,8 @@ export const MAP_STYLE: StyleSpecification = {
       layout: { "line-cap": "butt" },
       paint: { "line-color": "#D3D9E2", "line-width": ["interpolate", ["exponential", 2], ["zoom"], 8, 1, 12, 3, 15, 22, 18, 170] },
     },
-    {
-      id: "aeroway-runway-area", type: "fill", source: "omt", "source-layer": "aeroway", minzoom: 11,
-      filter: ["all", ["==", ["get", "class"], "runway"], ["match", ["geometry-type"], ["Polygon", "MultiPolygon"], true, false]],
-      paint: { "fill-color": "#D3D9E2" },
-    },
+    // No runway AREAS (OSM polygons): mappers often draw them with turn pads, blast pads or overlaps, and the tiles
+    // simplify them, which gave « deformed » runways (e.g. LSGG 04/22). Runways are drawn from their centreline only.
     {
       id: "water-name", type: "symbol", source: "omt", "source-layer": "water_name", maxzoom: 8,
       filter: ["match", ["geometry-type"], ["Point", "MultiPoint"], true, false],
@@ -118,3 +116,44 @@ export const MAP_STYLE: StyleSpecification = {
     },
   ],
 };
+
+// ---------- seasonal themes: the base map takes the colours of the site theme ----------
+// Only the background (land, water, borders, roads, airport areas) changes. Runways, taxiways, aircraft, routes and
+// sectors keep their colours so that the radar stays exactly as readable in every theme.
+type MapPalette = {
+  bg: string; water: string; state: string; country: string; aerodrome: string; apron: string;
+  building: string; outline: string; roadMinor: string; roadSecondary: string; roadMajor: string;
+};
+export const MAP_THEMES: Record<SiteTheme, MapPalette> = {
+  standard: { bg: "#0B1018", water: "#17212F", state: "#2B3341", country: "#4A5466", aerodrome: "#111722", apron: "#1E2533",
+              building: "#1F2635", outline: "#2C3547", roadMinor: "#1A2130", roadSecondary: "#232C3D", roadMajor: "#2E3A50" },
+  noel: { bg: "#08130E", water: "#10273A", state: "#22402F", country: "#3F6B50", aerodrome: "#0D1B14", apron: "#18291F",
+          building: "#1A2D22", outline: "#27412F", roadMinor: "#13241A", roadSecondary: "#1A3022", roadMajor: "#244031" },
+  halloween: { bg: "#0D0714", water: "#1B1030", state: "#34204A", country: "#5B3A7E", aerodrome: "#130A1C", apron: "#20132E",
+               building: "#231632", outline: "#33204A", roadMinor: "#1A0F26", roadSecondary: "#24163A", roadMajor: "#30204D" },
+  paques: { bg: "#0D0C1D", water: "#152443", state: "#2E2B57", country: "#4C4888", aerodrome: "#131229", apron: "#1E1B3A",
+            building: "#211E40", outline: "#2F2B57", roadMinor: "#18163A", roadSecondary: "#211E48", roadMajor: "#2B2860" },
+};
+
+export function applyMapTheme(gl: GlMap, theme: SiteTheme): void {
+  const c = MAP_THEMES[theme] ?? MAP_THEMES.standard;
+  const set = (layer: string, prop: Parameters<GlMap["setPaintProperty"]>[1], value: string) => {
+    try {
+      if (gl.getLayer(layer)) gl.setPaintProperty(layer, prop, value);
+    } catch {
+      /* style not ready yet: applied again on load */
+    }
+  };
+  set("background", "background-color", c.bg);
+  set("water", "fill-color", c.water);
+  set("boundary-state", "line-color", c.state);
+  set("boundary-country", "line-color", c.country);
+  set("aerodrome-area", "fill-color", c.aerodrome);
+  set("apron-area", "fill-color", c.apron);
+  set("building", "fill-color", c.building);
+  set("building", "fill-outline-color", c.outline);
+  set("road-minor", "line-color", c.roadMinor);
+  set("road-secondary", "line-color", c.roadSecondary);
+  set("road-major", "line-color", c.roadMajor);
+  for (const l of ["water-name", "place-country", "place-city", "place-town"]) set(l, "text-halo-color", c.bg);
+}

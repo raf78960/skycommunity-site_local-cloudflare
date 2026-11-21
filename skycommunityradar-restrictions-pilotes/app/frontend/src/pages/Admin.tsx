@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -354,13 +355,18 @@ const JOURNAL_TYPES = [
 
 function Journal() {
   const [type, setType] = useState("");
+  const [callsign, setCallsign] = useState("");
+  const cs = callsign.trim().toUpperCase();
   const q = useQuery<FlightEvent[]>({
-    queryKey: ["admin-events", type],
-    queryFn: () => apiGet<FlightEvent[]>(`/admin/events?limit=300${type ? `&type=${type}` : ""}`),
+    queryKey: ["admin-events", type, cs],
+    queryFn: () => apiGet<FlightEvent[]>(`/admin/events?limit=300${type ? `&type=${type}` : ""}${cs ? `&callsign=${encodeURIComponent(cs)}` : ""}`),
     refetchInterval: 5000,
   });
   return (
     <div className="space-y-2">
+    <input value={callsign} onChange={(e) => setCallsign(e.target.value)} maxLength={12} placeholder={tr("Filtrer par indicatif (un seul vol)")}
+      className="w-64 rounded-lg border border-border bg-background px-3 py-1.5 font-mono text-xs uppercase outline-none focus:border-[color:var(--sc-accent)]"
+      data-testid="admin-journal-callsign" />
     <div className="flex flex-wrap gap-1.5" data-testid="admin-journal-filters">
       {JOURNAL_TYPES.map(([t, label]) => (
         <button key={t} onClick={() => setType(t)} data-testid={`admin-journal-filter-${t || "tout"}`}
@@ -373,7 +379,11 @@ function Journal() {
       {(q.data ?? []).map((e) => (
         <li key={e.id} className="flex gap-3 border-b border-border/40 py-1">
           <span className="text-muted-foreground w-36 shrink-0">{fmtDateTime(e.at)}</span>
-          <span className="w-20 shrink-0 text-[color:var(--sc-accent)]">{e.callsign ?? "—"}</span>
+          <span className="w-20 shrink-0 text-[color:var(--sc-accent)]">
+            {e.flight_id && e.callsign ? (
+              <Link to={`/flights/${e.flight_id}`} className="hover:underline" title={tr("Ouvrir ce vol et son historique")}>{e.callsign}</Link>
+            ) : (e.callsign ?? "—")}
+          </span>
           <span className="flex-1">
             {e.label}
             {e.details && <span className="text-muted-foreground"> — {e.details}</span>}

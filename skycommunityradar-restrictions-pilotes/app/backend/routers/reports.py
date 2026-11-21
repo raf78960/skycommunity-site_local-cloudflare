@@ -65,11 +65,18 @@ def _kind_query(kinds: list[str]) -> list[dict]:
 
 
 async def flight_controllers(flight_id: str) -> dict[str, str]:
-    """Controllers who really acted on the flight (journal entries written in ATC role)."""
+    """Controllers of the flight: those who acted on it (journal entries written in ATC role) AND those who were
+    responsible for it at some point (flight["controllers"], recorded by the engine tick) — e.g. the approach /
+    tower at the arrival, who often control without clicking anything on the site. Same rule as the reviews."""
     out: dict[str, str] = {}
     async for e in db.events.find({"flight_id": flight_id, "actor_role": "atc", "actor_id": {"$ne": None}},
                                   {"_id": 0, "actor_id": 1, "actor_name": 1}):
         out[e["actor_id"]] = e["actor_name"]
+    f = await db.flights.find_one({"id": flight_id}, {"_id": 0, "controllers": 1})
+    missing = [c for c in ((f or {}).get("controllers") or []) if c not in out]
+    if missing:
+        async for u in db.users.find({"id": {"$in": missing}}, {"_id": 0, "id": 1, "display_name": 1}):
+            out[u["id"]] = u["display_name"]
     return out
 
 

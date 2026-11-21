@@ -174,6 +174,13 @@ class Ctx:
     def can_edit_strip(self, f: dict) -> bool:
         return self.is_admin or (self.user.get("role") in ("atc", "instructeur") and self.concerns_me(f))
 
+    def pilot_can_edit_arr_rwy(self, f: dict) -> bool:
+        """Vol non contrôlé : le pilote du vol choisit lui-même sa piste d'arrivée, tant qu'aucun contrôleur ne gère
+        le vol en ce moment et qu'aucune position en ligne ne couvre l'aéroport d'arrivée."""
+        if self.user.get("role") not in ("pilote", "formation_pilote") or f.get("pilot_id") != self.user["id"]:
+            return False
+        return not self.responsible(f) and not covers_airport(self.positions, f["arrival"])
+
     def can_taxi(self, f: dict, kind: str) -> bool:
         """Taxi routes: the controller providing the ground service of that airport (or admin)."""
         if self.is_admin:

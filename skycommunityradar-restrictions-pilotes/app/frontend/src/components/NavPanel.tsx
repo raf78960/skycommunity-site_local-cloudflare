@@ -142,6 +142,7 @@ export default function NavPanel({ flight: f, ed }: { flight: FlightDetail; ed?:
   const m = useFlightMutation(f.id);
   const [wp, setWp] = useState("");
   const [turns, setTurns] = useState<number>(2);
+  const [holdTurn, setHoldTurn] = useState<"right" | "left">("right"); // racetrack: right turns = standard
   if (!f.can_nav) return null;
   const here = f.position.distance_nm;
   const ahead = f.route
@@ -165,7 +166,7 @@ export default function NavPanel({ flight: f, ed }: { flight: FlightDetail; ed?:
               ? tr("En route vers le point du hold.")
               : h.exit
                 ? tr("Sortie demandée : l'avion finit son tour et reprend la route en passant sur le point.")
-                : tr("Tour {0}{1} — hippodrome à droite, axe {2}°, branches de {3} min.", [Math.min(h.laps_done + 1, h.turns ?? h.laps_done + 1), h.turns ? ` / ${h.turns}` : "", Math.round(h.inbound), h.leg_s / 60]) +
+                : tr(h.turn === "left" ? "Tour {0}{1} — hippodrome à gauche, axe {2}°, branches de {3} min." : "Tour {0}{1} — hippodrome à droite, axe {2}°, branches de {3} min.", [Math.min(h.laps_done + 1, h.turns ?? h.laps_done + 1), h.turns ? ` / ${h.turns}` : "", Math.round(h.inbound), h.leg_s / 60]) +
                   (h.turns ? " " + tr("Sortie automatique à la fin du tour {0}.", [h.turns]) : "")}
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -209,14 +210,19 @@ export default function NavPanel({ flight: f, ed }: { flight: FlightDetail; ed?:
                 className="h-8 rounded-md border border-border bg-background px-2 text-xs" data-testid="nav-turns">
                 {TURN_CHOICES.map((n) => <option key={n} value={n}>{tLabel(n || null)}</option>)}
               </select>
+              <select value={holdTurn} onChange={(e) => setHoldTurn(e.target.value as "right" | "left")}
+                className="h-8 rounded-md border border-border bg-background px-2 text-xs" data-testid="nav-hold-turn" title={tr("Sens des virages du hold")}>
+                <option value="right">{tr("Virages à droite")}</option>
+                <option value="left">{tr("Virages à gauche")}</option>
+              </select>
               <Button size="sm" variant="outline" disabled={wp === "" || m.isPending}
-                onClick={() => send({ op: "hold", waypoint_index: Number(wp), ...(turns ? { turns } : {}) }, tr("Hold sur {0}", [f.route[Number(wp)]?.ident]))}
+                onClick={() => send({ op: "hold", waypoint_index: Number(wp), turn: holdTurn, ...(turns ? { turns } : {}) }, tr("Hold sur {0}", [f.route[Number(wp)]?.ident]))}
                 data-testid="nav-hold">
                 <RotateCw className="h-3.5 w-3.5" />{" "}{tr("Hold")}</Button>
             </>
           )}
         </div>
-        <p className="text-[11px] text-muted-foreground">{tr("Hold : hippodrome standard (virages à droite, branches d'1 min sous le FL140). L'avion sort tout seul à la fin des tours prévus ; « Sortir du hold » le fait sortir plus tôt, à la fin du tour en cours.")}</p>
+        <p className="text-[11px] text-muted-foreground">{tr("Hold : hippodrome (virages à droite en standard, ou à gauche si la procédure le demande ; branches d'1 min sous le FL140). L'avion sort tout seul à la fin des tours prévus ; « Sortir du hold » le fait sortir plus tôt, à la fin du tour en cours.")}</p>
       </div>
     </div>
   );

@@ -41,6 +41,12 @@ TRACK_OF = {"roulage": "taxi_out", "alignement": "lineup", "decollage": "air", "
             "roulage_arrivee": "taxi_in", "retour_parking": "taxi_back"}
 TAXI_TRACKS = ("taxi_out", "taxi_in", "taxi_back", "lineup")
 LINEUP_KT = 8.0  # entering the runway and turning onto the centreline
+BACKTRACK_KT = 20.0  # backtracking the runway to its end before lining up (small airfields, no holding point there)
+BACKTRACK_MIN_NM = 0.15  # « Remonter la piste » is offered when the aircraft enters the runway farther than this from its start
+
+
+def lineup_kt(f: dict) -> float:
+    return BACKTRACK_KT if (f.get("lineup") or {}).get("backtrack") else LINEUP_KT
 LINEUP_HOLD_S = 0.0  # pas d'arrêt entre alignement et décollage (roulement continu)
 TAKEOFF_ROLL_KT = 85.0  # vitesse moyenne du roulage au décollage (0 -> ~150 kt), ~40 s sur la piste
 CLIMB_RAMP_S = 60.0  # après la rotation, la montée part à 60 % du profil et atteint 100 % en une minute
@@ -57,6 +63,9 @@ ACTIONS: dict[str, dict] = {
     "point_attente": dict(label="Arrivé au point d'attente", frm=["roulage"], to="point_attente", roles=P),
     # « Aligner et maintenir »: the aircraft enters the runway and waits there for its take-off clearance
     "alignement": dict(label="Aligner et maintenir", frm=["point_attente"], to="alignement", roles=P),
+    # small airfields (e.g. LFOB): no holding point at the runway end, the aircraft backtracks the runway, turns
+    # around at its end and lines up there. Offered only when it enters the runway away from its start.
+    "remonter_piste": dict(label="Remonter la piste et s'aligner", frm=["point_attente"], to="alignement", roles=P),
     # from the holding point the aircraft first lines up (shown on the map), then rolls by itself
     "decollage": dict(label="Décollage", frm=["point_attente", "alignement"], to="decollage", roles=P, confirm=True),
     "approche": dict(label="Entrée en approche", frm=["en_route"], to="approche", roles=P),
@@ -221,7 +230,7 @@ def current_distance(f: dict, now: datetime) -> float:
             if f.get("holding"):
                 d = min(d, f["holding"]["fix_nm"])
         else:
-            d += elapsed * (LINEUP_KT if track == "lineup" else TAXI_SPEED_KT) / 3600.0
+            d += elapsed * (lineup_kt(f) if track == "lineup" else TAXI_SPEED_KT) / 3600.0
     return max(0.0, min(d, length))
 
 
@@ -607,6 +616,8 @@ def allowed_actions(f: dict, role: str, is_owner: bool, controlled: bool = False
             continue  # the take-off can only be interrupted during its first minute
         if code == "repartir" and not f.get("returned_to_stand"):
             continue  # only after an interrupted take-off; at the arrival the flight simply ends
+        if code == "remonter_piste" and not backtrack_useful(f):
+            continue
         if code == "go_around" and not go_around_possible(f, utcnow()):
             continue  # only on short final or after touchdown
         out.append(dict(code=code, label=a["label"], confirm=bool(a.get("confirm")),
@@ -758,18 +769,66 @@ def build_lineup(f: dict) -> None:
                    "seg_names": [f"Piste {rw['ident']}", f"Piste {rw['ident']}"], "names": [f"Piste {rw['ident']}"]}
 
 
+def _runway_entry(f: dict) -> tuple[dict, tuple[float, float]] | None:
+    """(departure runway, point where the aircraft enters it) — from the end of the taxi or the holding point."""
+    rw = f["route"][0].get("rwy")
+    out = (f.get("taxi_out") or {}).get("path") or []
+    hp = f.get("holding_point") or {}
+    start = (out[-1][0], out[-1][1]) if out else ((hp["lat"], hp["lon"]) if hp.get("lat") is not None else None)
+    if not rw or not start:
+        return None
+    return rw, project_on_runway(rw, start[0], start[1])
+
+
+def _runway_start(rw: dict) -> tuple[float, float]:
+    """Physical start of the runway (before a displaced threshold): where a backtracking aircraft turns around."""
+    from lib.runways import offset
+    return offset(rw["end_lat"], rw["end_lon"], (float(rw["hdg"]) + 180) % 360, float(rw.get("length_nm") or 0))
+
+
+def backtrack_useful(f: dict) -> bool:
+    e = _runway_entry(f)
+    if not e:
+        return False
+    rw, entry = e
+    return haversine_nm(*entry, *_runway_start(rw)) > BACKTRACK_MIN_NM
+
+
+def add_backtrack(f: dict) -> bool:
+    """Line-up path: … holding point -> onto the runway -> backtrack to the runway end -> 180° turn -> lined up at the
+    start of the runway, nose in the take-off direction. Replaces the « straight onto the centreline » end."""
+    from lib.runways import offset
+    rw = f["route"][0].get("rwy")
+    lu = f.get("lineup") or {}
+    path = [list(p) for p in (lu.get("path") or [])]
+    if not rw or len(path) < 2:
+        return False
+    hdg = float(rw["hdg"])
+    pts = path[:-1]  # the last point was the short « nose along the runway » after entering
+    entry = project_on_runway(rw, pts[-1][0], pts[-1][1])
+    pts[-1] = list(entry)
+    st = _runway_start(rw)
+    at = lambda along, side=0.0: list(offset(*offset(*st, hdg, along), (hdg + 90) % 360, side) if side else offset(*st, hdg, along))
+    pts += [at(0.05), at(0.015, -0.008), at(0.008, 0.006), at(0.035)]  # backtrack, then turn around at the end
+    seg = list(lu.get("seg_names") or [])[: len(path) - 2]
+    seg += [f"Piste {rw['ident']}"] * (len(pts) - 1 - len(seg))
+    f["lineup"] = {**lu, "path": pts, "hdg": hdg, "seg_names": seg, "backtrack": True,
+                   "names": (lu.get("names") or []) + [f"Remontée de la piste {rw['ident']}"]}
+    return True
+
+
 def lined_up_since(f: dict, now: datetime) -> float | None:
     """Seconds since the aircraft finished lining up (None while it is still entering the runway)."""
     p = f["progress"]
     if f["phase"] != "alignement" or p.get("track") != "lineup" or not is_moving(f):
         return None
     left = track_length(f, "lineup") - float(p.get("anchor_dist", 0.0))
-    done_at = (aware(p.get("anchor_at")) or now).timestamp() + max(0.0, left) / LINEUP_KT * 3600
+    done_at = (aware(p.get("anchor_at")) or now).timestamp() + max(0.0, left) / lineup_kt(f) * 3600
     return now.timestamp() - done_at if now.timestamp() >= done_at else None
 
 
 # ---------- holding pattern (attente) on a fix of the route ----------
-# Standard racetrack: right turns, inbound leg on the route course towards the fix, 1 min legs up to FL140
+# Racetrack: right turns (standard) or left turns when asked, inbound leg on the route course towards the fix, 1 min legs up to FL140
 # (1 min 30 above), 180° turns in 1 min, ICAO holding speeds. Asked by the controller (or the pilot when the flight
 # is not controlled) with a number of turns: it leaves by itself at the end of the last one (« jusqu'à nouvel ordre »:
 # it holds until told to leave). « Sortir du hold » makes it leave earlier, at the end of the lap in progress.
@@ -808,20 +867,21 @@ def hold_entered_at(f: dict, now: datetime) -> datetime | None:
 
 
 def racetrack_point(h: dict, t: float) -> tuple[float, float, float]:
-    """(lat, lon, heading) t seconds after crossing the fix, on the racetrack (right turns)."""
+    """(lat, lon, heading) t seconds after crossing the fix, on the racetrack (right turns, or left: mirrored)."""
     from lib.runways import offset
     hdg, leg_s, v = h["inbound"], h["leg_s"], h["speed_kt"]
+    s = -1.0 if h.get("turn") == "left" else 1.0  # side of the turns
     r = v * TURN_S / 3600.0 / math.pi  # radius of a 180° turn flown in 1 min
     L = v * leg_s / 3600.0
     t %= hold_lap_s(h)
     fix = (h["lat"], h["lon"])
-    if t < TURN_S:  # outbound turn, centre on the right of the inbound course
+    if t < TURN_S:  # outbound turn, centre on the side of the turns
         a = 180.0 * t / TURN_S
-        c = offset(*fix, hdg + 90, r)
-        lat, lon = offset(*c, hdg - 90 + a, r)
-        return lat, lon, (hdg + a) % 360
+        c = offset(*fix, hdg + 90 * s, r)
+        lat, lon = offset(*c, hdg - 90 * s + a * s, r)
+        return lat, lon, (hdg + a * s) % 360
     t -= TURN_S
-    a_pt = offset(*fix, hdg + 90, 2 * r)
+    a_pt = offset(*fix, hdg + 90 * s, 2 * r)
     if t < leg_s:  # outbound leg
         lat, lon = offset(*a_pt, hdg + 180, L * t / leg_s)
         return lat, lon, (hdg + 180) % 360
@@ -829,11 +889,11 @@ def racetrack_point(h: dict, t: float) -> tuple[float, float, float]:
     b_pt = offset(*a_pt, hdg + 180, L)
     if t < TURN_S:  # inbound turn
         a = 180.0 * t / TURN_S
-        c = offset(*b_pt, hdg - 90, r)
-        lat, lon = offset(*c, hdg + 90 + a, r)
-        return lat, lon, (hdg + 180 + a) % 360
+        c = offset(*b_pt, hdg - 90 * s, r)
+        lat, lon = offset(*c, hdg + 90 * s + a * s, r)
+        return lat, lon, (hdg + 180 + a * s) % 360
     t -= TURN_S
-    d_pt = offset(*b_pt, hdg - 90, 2 * r)
+    d_pt = offset(*b_pt, hdg - 90 * s, 2 * r)
     lat, lon = offset(*d_pt, hdg, L * min(1.0, t / leg_s))
     return lat, lon, hdg % 360
 
@@ -843,7 +903,7 @@ def racetrack_path(h: dict, n: int = 48) -> list[list[float]]:
     return [[round(a, 6), round(b, 6)] for a, b, _ in (racetrack_point(h, lap * i / n) for i in range(n + 1))]
 
 
-def start_holding(f: dict, idx: int, turns: int | None, now: datetime, by: str) -> dict:
+def start_holding(f: dict, idx: int, turns: int | None, now: datetime, by: str, turn: str | None = None) -> dict:
     """Holding pattern on route[idx] (a fix still ahead of the aircraft). Raises ValueError (French message)."""
     if f["phase"] not in ("en_route", "approche") or f["progress"].get("track") != "air":
         raise ValueError("Un hold se demande en vol (en route ou en approche).")
@@ -859,7 +919,7 @@ def start_holding(f: dict, idx: int, turns: int | None, now: datetime, by: str) 
     leg_s, speed = hold_params(alt)
     f["holding"] = {"ident": route[idx]["ident"], "fix_nm": route[idx]["cum_nm"], "lat": route[idx]["lat"],
                     "lon": route[idx]["lon"], "inbound": round(bearing(prev["lat"], prev["lon"], route[idx]["lat"], route[idx]["lon"]), 1),
-                    "turns": turns, "leg_s": leg_s, "speed_kt": speed, "alt_ft": alt, "exit": False,
+                    "turns": turns, "turn": "left" if turn == "left" else "right", "leg_s": leg_s, "speed_kt": speed, "alt_ft": alt, "exit": False,
                     "entered_at": None, "turns_done_logged": False, "set_by": by, "set_at": now}
     return f["holding"]
 
@@ -871,7 +931,7 @@ def holding_info(f: dict, now: datetime) -> dict | None:
     entered = hold_entered_at(f, now)
     laps = int((now - entered).total_seconds() // hold_lap_s(h)) if entered else 0
     return {"ident": h["ident"], "turns": h.get("turns"), "laps_done": laps, "entered": bool(entered),
-            "exit": bool(h.get("exit")), "inbound": h["inbound"], "leg_s": h["leg_s"], "speed_kt": h["speed_kt"],
+            "exit": bool(h.get("exit")), "turn": h.get("turn") or "right", "inbound": h["inbound"], "leg_s": h["leg_s"], "speed_kt": h["speed_kt"],
             "lap_s": hold_lap_s(h), "path": racetrack_path(h),
             "turns_done": bool(entered and h.get("turns") and laps >= h["turns"])}
 
@@ -1188,9 +1248,9 @@ def go_around_possible(f: dict, now: datetime) -> bool:
     return pos["track"] == "air" and pos["total_nm"] - pos["distance_nm"] <= GA_NEAR_NM
 
 
-def go_around(f: dict, now: datetime) -> None:
-    """Remise de gaz : montée dans l'axe de la piste, tour de piste du côté de la piste (gauche, ou droite pour une
-    piste « R »), puis retour en finale 8 NM pour un nouvel atterrissage. La route est complétée à partir de la
+def go_around(f: dict, now: datetime, circuit: str | None = None) -> None:
+    """Remise de gaz : montée dans l'axe de la piste, tour de piste main gauche ou main droite (`circuit` ; par défaut
+    du côté de la piste : gauche, ou droite pour une piste « R »), puis retour en finale 8 NM pour un nouvel atterrissage. La route est complétée à partir de la
     position de l'avion : il ne saute nulle part."""
     from lib.runways import offset
     route = f["route"]
@@ -1218,7 +1278,8 @@ def go_around(f: dict, now: datetime) -> None:
         alt, passed = elev, len(route) - 2
     passed = min(passed, len(route) - 2)
     hdg, thr = float(rw["hdg"]), (rw["lat"], rw["lon"])
-    side = hdg + 90 if str(rw["ident"]).upper().endswith("R") else hdg - 90
+    right = circuit == "right" if circuit in ("left", "right") else str(rw["ident"]).upper().endswith("R")
+    side = hdg + 90 if right else hdg - 90
     ga_alt = elev + 3000
     up = offset(*thr, hdg, float(rw.get("length_nm") or 1.5) + 2.0)
     cross = offset(*up, side, 2.5)
@@ -1251,7 +1312,7 @@ def go_around(f: dict, now: datetime) -> None:
     set_track(f, "air", new[ga_first]["cum_nm"], now)
     f["last_wp_index"] = ga_first
     f["approach_note"] = (f"Remise de gaz : montée dans l'axe de la {rw['ident']}, tour de piste à "
-                          f"{'droite' if side > hdg else 'gauche'}, retour en finale 8 NM pour un nouvel atterrissage")
+                          f"{'main droite' if right else 'main gauche'}, retour en finale 8 NM pour un nouvel atterrissage")
 
 
 REJECT_ACTIONS = ("interrompre_decollage", "retour_parking")

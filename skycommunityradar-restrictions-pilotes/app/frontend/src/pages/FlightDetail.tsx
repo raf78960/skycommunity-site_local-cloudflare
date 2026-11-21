@@ -8,6 +8,7 @@ import RadarMap from "@/components/RadarMap";
 import { useFlight, useGround } from "@/lib/hooks";
 import type { User } from "@/lib/types";
 import { useFlightEditing } from "@/lib/useFlightEditing";
+import { ReplayLink } from "@/lib/replay";
 
 import { tr } from "@/lib/i18n";
 function DetailView({ id }: { id: string; user: User }) {
@@ -38,8 +39,11 @@ function DetailView({ id }: { id: string; user: User }) {
           <Link to={`/?f=${f.id}`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" data-testid="back-to-radar">
             <ArrowLeft className="h-3.5 w-3.5" />{" "}{tr("Radar")}</Link>
           {/* back to the radar with this flight open in the side panel */}
-          <Button size="sm" variant="outline" render={<Link to={`/?f=${f.id}`} />} data-testid="close-full-page">
-            <X className="h-4 w-4" />{" "}{tr("Fermer")}</Button>
+          <span className="flex items-center gap-2">
+            {f.can_replay && <ReplayLink flightId={f.id} label />}
+            <Button size="sm" variant="outline" render={<Link to={`/?f=${f.id}`} />} data-testid="close-full-page">
+              <X className="h-4 w-4" />{" "}{tr("Fermer")}</Button>
+          </span>
         </div>
         <FlightPanel flight={f} ed={ed} fullPage />
       </aside>

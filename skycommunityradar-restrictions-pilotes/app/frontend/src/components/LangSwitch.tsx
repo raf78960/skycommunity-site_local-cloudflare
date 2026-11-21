@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 export default function LangSwitch({ className }: { className?: string }) {
   const lang = useLang();
   return (
-    <div className={cn("flex rounded-md border border-border bg-background/60 p-0.5 text-[11px] font-semibold", className)} role="radiogroup" aria-label="Langue / Language" data-testid="lang-switch">
+    <div className={cn("flex h-9 items-center rounded-md border border-border bg-background/60 p-0.5 text-[11px] font-semibold", className)} role="radiogroup" aria-label="Langue / Language" data-testid="lang-switch">
       {(["fr", "en"] as Lang[]).map((l) => (
         <button
           key={l}

@@ -71,6 +71,59 @@ def best_aligned(icao: str, wanted_hdg: float) -> dict | None:
     return min(ends, key=lambda r: (abs((r["hdg"] - wanted_hdg + 540) % 360 - 180), -r["length_nm"]))
 
 
+def axis_coords(lat0: float, lon0: float, hdg: float, lat: float, lon: float) -> tuple[float, float]:
+    """(along, lateral) in NM of (lat, lon) from (lat0, lon0) along heading `hdg`; lateral > 0 = right of `hdg`."""
+    k = math.cos(math.radians(lat0))
+    x, y = (lon - lon0) * 60.0 * k, (lat - lat0) * 60.0
+    h = math.radians(hdg)
+    ux, uy = math.sin(h), math.cos(h)
+    return x * ux + y * uy, x * uy - y * ux
+
+
+def from_axis(lat0: float, lon0: float, hdg: float, along: float, lateral: float) -> tuple[float, float]:
+    lat, lon = offset(lat0, lon0, hdg, along)
+    return offset(lat, lon, (hdg + 90) % 360, lateral) if lateral >= 0 else offset(lat, lon, (hdg + 270) % 360, -lateral)
+
+
+FINAL_NM = 8.0  # length of the generated final
+
+
+def _straight_out_nm(d: dict, nxt: dict) -> float:
+    """Initial climb in the runway axis before turning: 3 NM, shortened so that the aircraft never flies past the
+    first SID fix and comes back to it (e.g. EGKK 26L -> D257B, just after the end of the runway)."""
+    end = offset(d["lat"], d["lon"], d["hdg"], d["length_nm"])
+    along, lateral = axis_coords(end[0], end[1], d["hdg"], nxt["lat"], nxt["lon"])
+    if along > 1.0 and abs(lateral) < along * 2:
+        return round(max(0.5, min(3.0, along * 0.5)), 1)  # fix ahead: turn well before it
+    return 2.0  # fix behind or abeam: climb straight out, then turn back
+
+
+def _approach_points(a: dict, prev: dict, elev: float | None) -> list[dict]:
+    """Realistic join of the final from the last STAR fix: intercept at ~30° when coming from the approach side,
+    otherwise downwind + base on the side of the arrival, never across the runway or backwards."""
+    hr = (a["hdg"] + 180) % 360  # from the threshold outwards along the extended centreline
+    s, l = axis_coords(a["lat"], a["lon"], hr, prev["lat"], prev["lon"])
+    side = 1.0 if l >= 0 else -1.0
+    alt = (elev or 0) + 3000
+
+    def pt(ident: str, name: str, along: float, lateral: float) -> dict:
+        lat, lon = from_axis(a["lat"], a["lon"], hr, along, lateral)
+        return dict(ident=ident, name=name, lat=lat, lon=lon, alt_ft=alt, ias_kt=None, kind="rwy", synthetic=True)
+
+    out: list[dict] = []
+    if s >= FINAL_NM + 6:
+        # coming from the approach side: direct to the final if the intercept angle is gentle, else a 30° intercept
+        angle = math.degrees(math.atan2(abs(l), s - FINAL_NM))
+        if angle > 35:
+            out.append(pt(f"INT{a['ident']}", "Interception de l'axe (30°)", FINAL_NM + 5, side * 3))
+    else:
+        # abeam or behind the airport: downwind on the side of arrival, then base, then final
+        if s < FINAL_NM - 2:
+            out.append(pt(f"DW{a['ident']}", "Vent arrière", min(max(s, 0.0), FINAL_NM - 2), side * 5))
+        out.append(pt(f"BASE{a['ident']}", "Étape de base", FINAL_NM + 4, side * 4))
+    return out
+
+
 def project_on_runway(rwy: dict, lat: float, lon: float) -> tuple[float, float]:
     """Closest point of the runway centreline to (lat, lon). The centreline runs from the PHYSICAL start of the runway
     (before a displaced threshold, e.g. LFML 31R: ~600 m) to the far end: an aircraft entering at the very
@@ -111,20 +164,33 @@ def apply_runway_geometry(points: list[dict], dep: str, arr: str, dep_rwy: str |
         elev = d["elev_ft"] if d["elev_ft"] is not None else first.get("alt_ft")
         first.update(lat=d["lat"], lon=d["lon"], alt_ft=elev, rwy={**d, "use": "dep"})
         lo = offset(d["lat"], d["lon"], d["hdg"], d["length_nm"] * 0.55)
-        co = offset(d["lat"], d["lon"], d["hdg"], d["length_nm"] + 3.0)
+        straight = _straight_out_nm(d, nxt)
+        co = offset(d["lat"], d["lon"], d["hdg"], d["length_nm"] + straight)
         new_pts += [first,
                     dict(ident=f"RW{d['ident']}", name="Rotation (axe de piste)", lat=lo[0], lon=lo[1], alt_ft=elev,
                          ias_kt=None, kind="rwy", synthetic=True),
-                    dict(ident=f"{d['ident']}+3", name="Montée initiale dans l'axe", lat=co[0], lon=co[1],
+                    dict(ident=f"{d['ident']}+{straight:g}", name="Montée initiale dans l'axe", lat=co[0], lon=co[1],
                          alt_ft=(elev or 0) + 1000, ias_kt=None, kind="rwy", synthetic=True)]
         t_dep = TAKEOFF_S  # roll + initial climb, added before the SimBrief times
     else:
         warnings.append(f"Aucune piste connue pour {dep} : départ depuis le point de référence de l'aéroport.")
         new_pts.append(first)
-    new_pts += points[1:-1]
+    middle = points[1:-1]
+    if a:
+        # STAR fixes already inside the final (or right over the airport) are replaced by the generated final:
+        # flying to them would send the aircraft backwards
+        hr = (a["hdg"] + 180) % 360
+        while middle:
+            s_, l_ = axis_coords(a["lat"], a["lon"], hr, middle[-1]["lat"], middle[-1]["lon"])
+            if (-1.0 <= s_ <= FINAL_NM + 1 and abs(l_) <= 3.0) or haversine_nm(a["lat"], a["lon"], middle[-1]["lat"], middle[-1]["lon"]) < 4.0:
+                middle.pop()
+            else:
+                break
+    new_pts += middle
     if a:
         elev = a["elev_ft"] if a["elev_ft"] is not None else last.get("alt_ft")
-        faf = offset(a["lat"], a["lon"], (a["hdg"] + 180) % 360, 8.0)
+        new_pts += _approach_points(a, new_pts[-1], elev)
+        faf = offset(a["lat"], a["lon"], (a["hdg"] + 180) % 360, FINAL_NM)
         ro = offset(a["lat"], a["lon"], a["hdg"], a["length_nm"] * 0.5)
         new_pts += [dict(ident=f"FINAL{a['ident']}", name="Finale 8 NM (axe de piste)", lat=faf[0], lon=faf[1],
                          alt_ft=(elev or 0) + 2500, ias_kt=None, kind="rwy", synthetic=True),
